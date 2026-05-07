@@ -1,86 +1,88 @@
 package reporter
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
-	"github.com/envlens/internal/differ"
-	"github.com/envlens/internal/masker"
+	"github.com/yourorg/envlens/internal/auditor"
+	"github.com/yourorg/envlens/internal/differ"
+	"github.com/yourorg/envlens/internal/masker"
 )
 
-// Format represents the output format for reports.
-type Format string
-
-const (
-	FormatText Format = "text"
-	FormatJSON Format = "json"
-)
-
-// Options configures report generation.
+// Options controls report generation.
 type Options struct {
-	Format       Format
-	ShowUnchanged bool
-	MaskSecrets  bool
-	Output       io.Writer
+	Format      string // "text" or "json"
+	ShowSame    bool
+	MaskSecrets bool
+	Audit       bool
+	Out         io.Writer
 }
 
-// DefaultOptions returns sensible defaults for report generation.
+// DefaultOptions returns sensible defaults.
 func DefaultOptions() Options {
 	return Options{
-		Format:      FormatText,
+		Format:      "text",
+		ShowSame:    false,
 		MaskSecrets: true,
-		Output:      os.Stdout,
+		Audit:       false,
+		Out:         os.Stdout,
 	}
 }
 
 // Generate produces a diff report between two env maps.
 func Generate(base, target map[string]string, opts Options) error {
-	if opts.Output == nil {
-		opts.Output = os.Stdout
-	}
-
 	m := masker.New()
 	if opts.MaskSecrets {
 		base = m.MaskMap(base)
 		target = m.MaskMap(target)
 	}
 
-	results := differ.Diff(base, target)
+	entries := differ.Diff(base, target)
+
+	var auditReport *auditor.Report
+	if opts.Audit {
+		auditReport = auditor.Audit(target)
+	}
 
 	switch opts.Format {
-	case FormatJSON:
-		return writeJSON(opts.Output, results, opts.ShowUnchanged)
+	case "json":
+		return writeJSON(opts.Out, entries, auditReport, opts)
 	default:
-		return writeText(opts.Output, results, opts.ShowUnchanged)
+		return writeText(opts.Out, entries, auditReport, opts)
 	}
 }
 
-func writeText(w io.Writer, results []differ.Result, showUnchanged bool) error {
-	output := differ.Format(results, showUnchanged)
-	_, err := fmt.Fprint(w, output)
-	return err
+func writeText(w io.Writer, entries []differ.Entry, audit *auditor.Report, opts Options) error {
+	fmt.Fprint(w, differ.Format(entries, opts.ShowSame))
+	if audit != nil && len(audit.Issues) > 0 {
+		fmt.Fprintln(w, "\n--- Audit Issues ---")
+		fmt.Fprint(w, audit.Summary())
+	}
+	return nil
 }
 
-func writeJSON(w io.Writer, results []differ.Result, showUnchanged bool) error {
-	var sb strings.Builder
-	sb.WriteString("[\n")
-	first := true
-	for _, r := range results {
-		if !showUnchanged && r.Status == differ.StatusUnchanged {
-			continue
+type jsonOutput struct {
+	Diff  []differ.Entry  `json:"diff"`
+	Audit []auditor.Issue `json:"audit,omitempty"`
+}
+
+func writeJSON(w io.Writer, entries []differ.Entry, audit *auditor.Report, opts Options) error {
+	out := jsonOutput{Diff: entries}
+	if !opts.ShowSame {
+		filtered := entries[:0]
+		for _, e := range entries {
+			if e.Status != "unchanged" {
+				filtered = append(filtered, e)
+			}
 		}
-		if !first {
-			sb.WriteString(",\n")
-		}
-		first = false
-		sb.WriteString(fmt.Sprintf(
-			`  {"key": %q, "status": %q, "base_value": %q, "target_value": %q}`,
-			r.Key, r.Status, r.BaseValue, r.TargetValue,
-		))
+		out.Diff = filtered
 	}
-	sb.WriteString("\n]\n")
-	_, err := fmt.Fprint(w, sb.String())
-	return err
+	if audit != nil {
+		out.Audit = audit.Issues
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
