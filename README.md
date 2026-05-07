@@ -49,6 +49,12 @@ Show all keys without masking secrets (use with caution):
 envlens diff .env .env.production --unmask
 ```
 
+Output results as JSON for use in CI pipelines or scripts:
+
+```bash
+envlens diff .env.staging .env.production --json
+```
+
 ---
 
 ## Flags
