@@ -60,6 +60,20 @@ func TestDiff_UnchangedKey(t *testing.T) {
 	}
 }
 
+func TestDiff_EmptyMaps(t *testing.T) {
+	base := map[string]string{}
+	target := map[string]string{}
+
+	result := differ.Diff(base, target)
+
+	if len(result.Entries) != 0 {
+		t.Fatalf("expected 0 entries for empty maps, got %d", len(result.Entries))
+	}
+	if result.HasChanges() {
+		t.Error("expected HasChanges to return false for empty maps")
+	}
+}
+
 func TestResult_HasChanges(t *testing.T) {
 	base := map[string]string{"A": "1"}
 	target := map[string]string{"A": "2"}
