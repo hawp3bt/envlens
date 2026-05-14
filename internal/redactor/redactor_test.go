@@ -81,3 +81,19 @@ func TestRedact_EmptyMap_ReturnsEmptyMap(t *testing.T) {
 		t.Errorf("expected empty map, got %d entries", len(out))
 	}
 }
+
+func TestRedact_DoesNotMutateInput(t *testing.T) {
+	r := redactor.New(redactor.DefaultOptions())
+	env := map[string]string{"DB_PASSWORD": "s3cr3t", "APP_ENV": "production"}
+	// Take a snapshot of the original values before redaction.
+	orig := make(map[string]string, len(env))
+	for k, v := range env {
+		orig[k] = v
+	}
+	r.Redact(env)
+	for k, v := range orig {
+		if env[k] != v {
+			t.Errorf("input map was mutated: key %q changed from %q to %q", k, v, env[k])
+		}
+	}
+}
